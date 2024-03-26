@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>pkd-fetcher</title>
+    <meta name="robots" content="noindex">
+    <link href="https://cdn.jsdelivr.net/npm/bootswatch@4.5.2/dist/cyborg/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Montserrat" rel="stylesheet">
+    <style>
+        .container {
+            margin-top: 50px;
+            font-family: 'Montserrat', sans-serif;
+        }
+        .small-text {
+            font-size: 0.8em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>pkd-fetcher</h1>
+    <small class="small-text">Strona prezentuje dane o jednoosobowych działalnościach gospodarczych z PKD 56.10.A zarejestrowanych w wybranym miesiącu.<br>Czas ostatniej aktualizacji bazy: 2024-03-26 18:35:05.</small>
+    <div class="form-group">
+        <label for="selectMonth">Wybierz miesiąc:</label>
+        <select class="form-control" id="selectMonth"></select>
+    </div>
+    <div class="form-check mb-3">
+        <input type="checkbox" class="form-check-input" id="onlyWithAddress">
+        <label class="form-check-label" for="onlyWithAddress">Wyświetlaj tylko firmy z adresem</label>
+    </div>
+    <button class="btn btn-primary" id="filterButton">Znajdź firmy</button>
+    <button class="btn btn-info" id="exportButton">Eksportuj</button>
+    <div id="filteredCompanies"></div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.4/xlsx.full.min.js"></script>
+<script>
+    $(document).ready(function() {
+        const $selectMonth = $('#selectMonth');
+        const $onlyWithAddress = $('#onlyWithAddress');
+        const $filterButton = $('#filterButton');
+        const $exportButton = $('#exportButton');
+        const $filteredCompanies = $('#filteredCompanies');
+
+        const today = new Date();
+        const currentYear = today.getFullYear();
+        const currentMonth = today.getMonth() + 1;
+
+        $.getJSON("data.json", function(data) {
+            function compareDates(a, b) {
+                return new Date(b["DataRozpoczęciaDziałalności "]) - new Date(a["DataRozpoczęciaDziałalności "]);
+            }
+
+            data.tblBusinessEntityStats.Detail_Collection.sort(compareDates);
+
+            function generateDateOptions() {
+                let dateOptions = '';
+                const uniqueDates = new Set();
+                data.tblBusinessEntityStats.Detail_Collection.forEach(function(company) {
+                    const date = company["DataRozpoczęciaDziałalności "].substring(0, 7);
+                    if (date && !uniqueDates.has(date)) {
+                        uniqueDates.add(date);
+                    }
+                });
+                const sortedUniqueDates = Array.from(uniqueDates).sort().reverse();
+                sortedUniqueDates.forEach(function(date) {
+                    dateOptions += `<option value="${date}">${formatDate(date)}</option>`;
+                });
+                $selectMonth.html(dateOptions);
+            }
+
+            function formatDate(dateString) {
+                const [year, month] = dateString.split('-');
+                const months = ['Styczeń', 'Luty', 'Marzec', 'Kwiecień', 'Maj', 'Czerwiec', 'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień'];
+                return `${months[parseInt(month) - 1]} ${year} r.`;
+            }
+
+            generateDateOptions();
+
+            $filterButton.click(function() {
+                const selectedDate = $selectMonth.val();
+                const onlyWithAddress = $onlyWithAddress.prop('checked');
+                const filteredCompanies = data.tblBusinessEntityStats.Detail_Collection.filter(function(company) {
+                    const hasAddress = company.KodPocztowy && company.Miejscowość && company.Ulica;
+                    return company["DataRozpoczęciaDziałalności "] && company["DataRozpoczęciaDziałalności "].includes(selectedDate) && (!onlyWithAddress || hasAddress);
+                });
+                displayFilteredCompanies(filteredCompanies);
+            });
+
+            $exportButton.click(function() {
+                const selectedDate = $selectMonth.val();
+                const onlyWithAddress = $onlyWithAddress.prop('checked');
+                const filteredCompanies = data.tblBusinessEntityStats.Detail_Collection.filter(function(company) {
+                    const hasAddress = company.KodPocztowy && company.Miejscowość && company.Ulica;
+                    return company["DataRozpoczęciaDziałalności "] && company["DataRozpoczęciaDziałalności "].includes(selectedDate) && (!onlyWithAddress || hasAddress);
+                });
+
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.json_to_sheet(filteredCompanies);
+                XLSX.utils.book_append_sheet(wb, ws, "Firmy");
+
+                XLSX.writeFile(wb, 'filtered_companies.xlsx');
+            });
+        });
+
+        function displayFilteredCompanies(companies) {
+            let html = `<h2>Znalezione firmy (${companies.length}):</h2>`;
+            if (companies.length > 0) {
+                html += '<ul>';
+                companies.forEach(function(company) {
+                    const hasStartDate = company["DataRozpoczęciaDziałalności "];
+                    const hasPostalCode = company.KodPocztowy;
+                    const hasCity = company.Miejscowość;
+                    const hasStreet = company.Ulica;
+                    const hasName = company.NazwaPodmiotu;
+                    const hasNip = company.Nip;
+
+                    if (hasStartDate && hasPostalCode && hasCity && hasStreet && hasName && hasNip) {
+                        html += '<li>';
+                        html += `<strong>Nazwa: </strong>${company.NazwaPodmiotu}<br>`;
+                        html += `<strong>NIP: </strong>${company.Nip}<br>`;
+                        if (company.Regon) {
+                            html += `<strong>Regon: </strong>${company.Regon}<br>`;
+                        }
+                        if (hasPostalCode && hasCity && hasStreet) {
+                            html += `<strong>Adres: </strong>${company.KodPocztowy} ${company.Miejscowość}, ${company.Ulica} ${company.NrBudynku || ''}${company.NrLokalu ? '/' + company.NrLokalu : ''}<br>`;
+                        }
+                        html += `<strong>Data rozpoczęcia działalności: </strong>${company["DataRozpoczęciaDziałalności "] || ''}<br>`;
+                        html += '</li>';
+                    }
+                });
+                html += '</ul>';
+            } else {
+                html += '<p>Brak firm spełniających kryteria.</p>';
+            }
+            $filteredCompanies.html(html);
+        }
+    });
+</script>
+
+</body>
+</html>
